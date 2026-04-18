@@ -1,3 +1,5 @@
+# Data (download from Kaggle — see data/README.md)
+data/*.csv
 /battery_dataset.csv
 
 # Python
