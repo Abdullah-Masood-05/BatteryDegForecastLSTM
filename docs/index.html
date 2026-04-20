@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battery Degradation Forecasting — LSTM Results Dashboard</title>
+<meta name="description" content="Interactive results dashboard for an LSTM that forecasts smartphone battery degradation from 385K sensor readings.">
+<style>
+  /* ---------- Design tokens (validated reference palette) ---------- */
+  :root {
+    --page:        #f9f9f7;
+    --surface-1:   #fcfcfb;
+    --ink-1:       #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --baseline:    #c3c2b7;
+    --border:      rgba(11, 11, 11, 0.10);
+    --series-1:    #2a78d6;   /* blue  — training loss / forecast */
+    --series-2:    #1baf7a;   /* aqua  — validation loss */
+    --de-emphasis: #b5b3ac;   /* context series */
+    --accent-soft: rgba(42, 120, 214, 0.08);
+    --shadow:      0 1px 2px rgba(11, 11, 11, 0.05), 0 4px 16px rgba(11, 11, 11, 0.04);
+    --img-backing: #ffffff;
+  }
+  [data-theme="dark"] {
+    --page:        #0d0d0d;
+    --surface-1:   #1a1a19;
+    --ink-1:       #ffffff;
+    --ink-2:       #c3c2b7;
+    --muted:       #898781;
+    --grid:        #2c2c2a;
+    --baseline:    #383835;
+    --border:      rgba(255, 255, 255, 0.10);
+    --series-1:    #3987e5;
+    --series-2:    #199e70;
+    --de-emphasis: #55544f;
+    --accent-soft: rgba(57, 135, 229, 0.12);
+    --shadow:      none;
+  }
+
+  /* ---------- Base ---------- */
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink-1);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--series-1); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .skip {
+    position: absolute; left: -9999px; top: 0;
+    background: var(--surface-1); padding: 8px 14px; border-radius: 0 0 8px 0;
+  }
+  .skip:focus { left: 0; z-index: 10; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- Header ---------- */
+  .site-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 20px 0;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .brand svg { display: block; }
+  .site-nav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .site-nav a, .icon-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 12px; border-radius: 8px;
+    color: var(--ink-2); font-size: 14px; font-weight: 500;
+    border: 1px solid transparent; background: none; cursor: pointer;
+  }
+  .site-nav a:hover, .icon-btn:hover {
+    background: var(--accent-soft); color: var(--ink-1); text-decoration: none;
+  }
+  .icon-btn { border: 1px solid var(--border); }
+  :focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 4px; }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 48px 0 8px; }
+  .eyebrow {
+    font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--series-1); margin: 0 0 12px;
+  }
+  h1 {
+    font-size: clamp(30px, 4.5vw, 44px); line-height: 1.15;
+    font-weight: 700; letter-spacing: -0.02em; margin: 0 0 14px;
+  }
+  .lede { max-width: 62ch; color: var(--ink-2); font-size: 17px; margin: 0 0 20px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }
+  .chips li {
+    font-size: 13px; color: var(--ink-2);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 12px; background: var(--surface-1);
+  }
+
+  /* ---------- Sections ---------- */
+  section { margin: 40px 0; }
+  .section-head { margin-bottom: 16px; }
+  .section-head h2 {
+    font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 4px;
+  }
+  .section-head p { margin: 0; color: var(--ink-2); font-size: 15px; max-width: 70ch; }
+
+  /* ---------- KPI tiles ---------- */
+  .kpis {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow);
+    display: flex; flex-direction: column; gap: 2px; min-height: 112px;
+  }
+  .tile .label { font-size: 13.5px; color: var(--ink-2); font-weight: 500; }
+  .tile .value {
+    font-size: 30px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.2;
+  }
+  .tile .value sup { font-size: 0.55em; }
+  .tile .note { font-size: 12.5px; color: var(--muted); margin-top: auto; }
+  .tile .spark { margin-top: 6px; }
+
+  /* ---------- Chart cards ---------- */
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: var(--shadow); padding: 20px 22px 16px;
+  }
+  .card-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px; margin-bottom: 6px;
+  }
+  .card-head h3 { font-size: 16.5px; font-weight: 650; margin: 0; }
+  .card-head .sub { font-size: 13.5px; color: var(--ink-2); margin: 2px 0 0; }
+  .toggle {
+    flex: none; font-size: 12.5px; font-weight: 550; color: var(--ink-2);
+    background: none; border: 1px solid var(--border); border-radius: 8px;
+    padding: 5px 10px; cursor: pointer;
+  }
+  .toggle:hover { background: var(--accent-soft); color: var(--ink-1); }
+  .legend {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    font-size: 13px; color: var(--ink-2); margin: 6px 0 4px;
+  }
+  .legend .key { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .swatch { width: 16px; height: 0; border-top: 2.5px solid; border-radius: 2px; }
+  .chart-body { position: relative; }
+  .chart-body svg { display: block; width: 100%; height: auto; }
+  .caption { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+
+  /* tooltip */
+  .tip {
+    position: absolute; pointer-events: none; z-index: 5;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: var(--shadow);
+    padding: 8px 12px; font-size: 12.5px; min-width: 132px;
+    opacity: 0; transition: opacity 80ms linear;
+  }
+  .tip.on { opacity: 1; }
+  .tip .tip-title { color: var(--muted); font-weight: 550; margin-bottom: 3px; }
+  .tip .row { display: flex; align-items: center; gap: 7px; margin: 2px 0; }
+  .tip .row .k { width: 14px; height: 0; border-top: 2.5px solid; border-radius: 2px; flex: none; }
+  .tip .row .v { font-weight: 650; color: var(--ink-1); }
+  .tip .row .s { color: var(--ink-2); }
+
+  /* data tables (chart twins) */
+  .data-table { max-height: 330px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .data-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data-table th, .data-table td {
+    text-align: right; padding: 6px 12px; border-bottom: 1px solid var(--grid);
+    font-variant-numeric: tabular-nums;
+  }
+  .data-table th:first-child, .data-table td:first-child { text-align: left; }
+  .data-table thead th {
+    position: sticky; top: 0; background: var(--surface-1);
+    color: var(--ink-2); font-weight: 600; font-size: 12.5px;
+  }
+  .data-table tbody tr:last-child td { border-bottom: none; }
+  [hidden] { display: none !important; }
+
+  /* ---------- Two-up grid ---------- */
+  .duo { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+
+  /* ---------- Heatmap ---------- */
+  .heat {
+    display: grid; gap: 2px; /* the 2px surface gap between fills */
+    grid-template-columns: max-content repeat(4, 1fr);
+    align-items: stretch; margin-top: 10px;
+  }
+  .heat .corner { background: none; }
+  .heat .hlab {
+    font-size: 12px; color: var(--ink-2); display: flex; align-items: center;
+    padding-right: 10px; justify-content: flex-end; text-align: right;
+  }
+  .heat .vlab {
+    font-size: 12px; color: var(--ink-2); display: flex; align-items: flex-end;
+    justify-content: center; padding-top: 8px; text-align: center;
+  }
+  .heat .cell {
+    aspect-ratio: 1.6 / 1; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13.5px; font-weight: 600; cursor: default;
+  }
+  .heat .cell:hover { filter: brightness(1.06); }
+  .scale-legend { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 12px; color: var(--ink-2); }
+  .scale-legend .bar { flex: 1; height: 8px; border-radius: 4px; max-width: 220px; }
+
+  /* ---------- Pipeline ---------- */
+  .steps { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); counter-reset: step; }
+  .step {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; position: relative;
+  }
+  .step::before {
+    counter-increment: step; content: counter(step, decimal-leading-zero);
+    font-size: 12px; font-weight: 650; color: var(--series-1);
+    letter-spacing: 0.06em;
+  }
+  .step h4 { margin: 2px 0 4px; font-size: 14.5px; font-weight: 650; }
+  .step p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+
+  .spec-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 14px; }
+  .spec { background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow); }
+  .spec h3 { margin: 0 0 10px; font-size: 15.5px; font-weight: 650; }
+  .spec table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .spec td { padding: 7px 0; border-bottom: 1px solid var(--grid); }
+  .spec tr:last-child td { border-bottom: none; }
+  .spec td:first-child { color: var(--ink-2); }
+  .spec td:last-child { text-align: right; font-weight: 550; }
+
+  /* ---------- Gallery ---------- */
+  .gallery { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .gallery figure.wide { grid-column: 1 / -1; }
+  .gallery figure {
+    margin: 0; background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 14px; overflow: hidden; box-shadow: var(--shadow);
+  }
+  .gallery .img-frame { background: var(--img-backing); padding: 12px; }
+  .gallery img { display: block; width: 100%; height: auto; }
+  .gallery figcaption { padding: 12px 16px 14px; font-size: 13px; color: var(--ink-2); border-top: 1px solid var(--grid); }
+  .gallery figcaption strong { color: var(--ink-1); font-weight: 600; display: block; margin-bottom: 2px; }
+
+  /* ---------- Notes ---------- */
+  .notes { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .note-card {
+    border: 1px solid var(--border); border-left: 3px solid var(--series-1);
+    border-radius: 12px; background: var(--surface-1); padding: 14px 18px;
+  }
+  .note-card h4 { margin: 0 0 4px; font-size: 14.5px; }
+  .note-card p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+
+  /* ---------- Footer ---------- */
+  footer {
+    margin-top: 56px; padding: 22px 0 36px; border-top: 1px solid var(--grid);
+    font-size: 13.5px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between;
+  }
+  footer a { color: var(--ink-2); }
+
+  @media (max-width: 640px) {
+    .hero { padding-top: 28px; }
+    .card { padding: 16px 16px 12px; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="wrap">
+  <header class="site-header">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="3" y="7" width="16" height="10" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M21 10.5v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M11.8 9l-2.3 3h2.6l-1.9 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>Battery&nbsp;Forecast</span>
+    </div>
+    <nav class="site-nav" aria-label="External links">
+      <a href="https://github.com/Abdullah-Masood-05/BatteryDegForecastLSTM">GitHub</a>
+      <a href="https://www.kaggle.com/datasets/rahulgarg28/mobile-battery-with-time">Dataset</a>
+      <a href="https://github.com/Abdullah-Masood-05/BatteryDegForecastLSTM/blob/main/notebooks/battery_degradation_forecasting.ipynb">Notebook</a>
+      <button class="icon-btn" id="themeToggle" aria-label="Toggle color theme">
+        <span id="themeIcon" aria-hidden="true">◐</span><span id="themeLabel">Dark</span>
+      </button>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <p class="eyebrow">Time-series deep learning · Reference run</p>
+      <h1>Forecasting smartphone battery degradation with an LSTM</h1>
+      <p class="lede">
+        A single-layer LSTM learns one-step-ahead battery percentage from four telemetry
+        channels, then rolls its own predictions forward for a 24-step forecast.
+        Every number on this page comes from the reference notebook run in the repository.
+      </p>
+      <ul class="chips">
+        <li>Samsung SM-A910F · single device</li>
+        <li>385,429 sensor readings</li>
+        <li>Android 8.0.0 · 5,000 mAh Li-ion</li>
+        <li>TensorFlow / Keras</li>
+      </ul>
+    </section>
+
+    <section aria-label="Key metrics">
+      <div class="kpis">
+        <div class="tile">
+          <span class="label">Sensor readings</span>
+          <span class="value">385,429</span>
+          <span class="note">15 raw channels · 4 model features</span>
+        </div>
+        <div class="tile">
+          <span class="label">Held-out test MSE</span>
+          <span class="value">&lt;10<sup>−4</sup></span>
+          <span class="note">scaled units · chronological 20% test split</span>
+        </div>
+        <div class="tile">
+          <span class="label">Final validation loss</span>
+          <span class="value">5.55×10<sup>−7</sup></span>
+          <div class="spark" id="sparkVal" aria-hidden="true"></div>
+          <span class="note">epoch 30 of 30 · last 12 epochs shown</span>
+        </div>
+        <div class="tile">
+          <span class="label">Forecast horizon</span>
+          <span class="value">24 steps</span>
+          <span class="note">recursive, one step at a time</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="training">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Training &amp; validation loss</h3>
+            <p class="sub">Mean-squared error per epoch, log scale · 30 epochs · batch size 32</p>
+          </div>
+          <button class="toggle" data-toggle="loss" aria-pressed="false">View table</button>
+        </div>
+        <div class="legend" id="lossLegend"></div>
+        <div class="chart-body" id="lossChart" data-view="chart"></div>
+        <div class="data-table" id="lossTable" hidden></div>
+        <p class="caption">
+          Loss collapses by three orders of magnitude within five epochs and the validation
+          curve tracks training closely — no sign of overfitting.
+        </p>
+      </div>
+    </section>
+
+    <section>
+      <div class="duo">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Feature correlations</h3>
+              <p class="sub">Pearson r between the four model inputs</p>
+            </div>
+            <button class="toggle" data-toggle="corr" aria-pressed="false">View table</button>
+          </div>
+          <div id="corrHeat" data-view="chart"></div>
+          <div class="data-table" id="corrTable" hidden></div>
+          <p class="caption">
+            CPU usage and voltage move together (r = 0.79); battery percentage correlates
+            only moderately with any single channel.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>24-step forecast</h3>
+              <p class="sub">Last 50 readings and the recursive forecast beyond them</p>
+            </div>
+            <button class="toggle" data-toggle="fc" aria-pressed="false">View table</button>
+          </div>
+          <div class="legend" id="fcLegend"></div>
+          <div class="chart-body" id="fcChart" data-view="chart"></div>
+          <div class="data-table" id="fcTable" hidden></div>
+          <p class="caption">
+            The model expects the discharge to level off just above 31.6%. Future exogenous
+            channels are held at zero — see the notes below.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="pipeline">
+      <div class="section-head">
+        <h2>Pipeline</h2>
+        <p>From raw Kaggle export to forecast — each stage is an importable module in
+           <code>src/battery_forecast</code>.</p>
+      </div>
+      <div class="steps">
+        <div class="step"><h4>Ingest</h4><p>385,429 rows read with descriptive names for 15 raw columns; the unusable header row is skipped.</p></div>
+        <div class="step"><h4>Clean</h4><p>Numeric coercion, boolean mapping, timezone-aware timestamps, fully-empty columns dropped.</p></div>
+        <div class="step"><h4>Scale &amp; window</h4><p>Four channels min-max scaled to [0, 1]; sliding 24-step windows labelled with the next battery reading.</p></div>
+        <div class="step"><h4>Train</h4><p>LSTM(50) → Dense(1), Adam on MSE, 30 epochs; chronological 80/20 split with 10% validation.</p></div>
+        <div class="step"><h4>Evaluate</h4><p>Held-out tail of the series; test MSE below 10⁻⁴ in scaled units.</p></div>
+        <div class="step"><h4>Forecast</h4><p>24 recursive steps: each prediction is rolled back into the input window.</p></div>
+      </div>
+
+      <div class="spec-grid">
+        <div class="spec">
+          <h3>Architecture</h3>
+          <table>
+            <tr><td>Input</td><td>24 timesteps × 4 features</td></tr>
+            <tr><td>Recurrent layer</td><td>LSTM · 50 units · ReLU</td></tr>
+            <tr><td>Head</td><td>Dense(1) — next battery %</td></tr>
+            <tr><td>Parameters</td><td>≈ 11K trainable</td></tr>
+          </table>
+        </div>
+        <div class="spec">
+          <h3>Run configuration</h3>
+          <table>
+            <tr><td>Optimizer / loss</td><td>Adam / MSE</td></tr>
+            <tr><td>Epochs · batch</td><td>30 · 32</td></tr>
+            <tr><td>Split</td><td>80/20 chronological · 10% val</td></tr>
+            <tr><td>Features</td><td>battery %, apps, CPU, voltage</td></tr>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="gallery">
+      <div class="section-head">
+        <h2>From the notebook</h2>
+        <p>Figures exported directly from the executed notebook
+           (<code>scripts/export_notebook_assets.py</code>).</p>
+      </div>
+      <div class="gallery">
+        <figure class="wide">
+          <div class="img-frame">
+            <img src="assets/figures/actual_vs_predicted.png" loading="lazy"
+                 alt="Line chart comparing actual and predicted battery percentage across roughly 77,000 held-out timesteps; the two lines are nearly indistinguishable.">
+          </div>
+          <figcaption><strong>Actual vs. predicted — held-out test set</strong>
+            One-step-ahead predictions across ≈77K timesteps sit on top of the actual series.</figcaption>
+        </figure>
+        <figure>
+          <div class="img-frame">
+            <img src="assets/figures/eda_cpu_vs_battery.png" loading="lazy"
+                 alt="Scatter plot of battery percentage against CPU usage.">
+          </div>
+          <figcaption><strong>Battery % vs. CPU usage</strong>
+            Discharge behaviour across CPU load during exploration.</figcaption>
+        </figure>
+        <figure>
+          <div class="img-frame">
+            <img src="assets/figures/eda_apps_boxplot.png" loading="lazy"
+                 alt="Box plot of battery percentage grouped by the number of running apps.">
+          </div>
+          <figcaption><strong>Battery % by running apps</strong>
+            Distribution of charge level as the app count varies.</figcaption>
+        </figure>
+        <figure>
+          <div class="img-frame">
+            <img src="assets/figures/kmeans_clusters.png" loading="lazy"
+                 alt="Pair plot of battery percentage, CPU usage and app count coloured by three KMeans clusters.">
+          </div>
+          <figcaption><strong>Usage patterns (KMeans, k = 3)</strong>
+            Clustering the scaled features reveals three broad usage regimes.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="notes">
+      <div class="section-head">
+        <h2>Reading the results honestly</h2>
+      </div>
+      <div class="notes">
+        <div class="note-card">
+          <h4>Near-zero MSE ≠ oracle</h4>
+          <p>Battery percentage moves slowly relative to the sampling rate, so closely
+             tracking the previous value already yields a tiny one-step error. Benchmark
+             against a persistence baseline before claiming skill.</p>
+        </div>
+        <div class="note-card">
+          <h4>One device only</h4>
+          <p>All 385K readings come from a single Samsung SM-A910F. Nothing here is
+             evidence of generalization to other hardware or usage patterns.</p>
+        </div>
+        <div class="note-card">
+          <h4>Frozen future inputs</h4>
+          <p>During recursive forecasting the non-target channels are held at zero,
+             which limits long-horizon realism. Forecasting exogenous inputs jointly is
+             the natural next step.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>MIT License · Built by <a href="https://github.com/Abdullah-Masood-05">Abdullah Masood</a></span>
+    <span>Data: <a href="https://www.kaggle.com/datasets/rahulgarg28/mobile-battery-with-time">Mobile Battery with Time</a> (Kaggle)</span>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ================= Data (reference notebook run) ================= */
+const HISTORY = {
+  loss: [0.0016, 5.6337e-06, 4.1644e-06, 3.112e-06, 2.9271e-06, 2.7598e-06,
+    2.5887e-06, 2.3166e-06, 2.1073e-06, 2.2483e-06, 2.0647e-06, 2.0164e-06,
+    1.9942e-06, 1.9413e-06, 1.9939e-06, 1.9996e-06, 2.0015e-06, 1.8372e-06,
+    1.8895e-06, 2.0074e-06, 1.7279e-06, 1.7076e-06, 1.7926e-06, 1.9128e-06,
+    1.7789e-06, 1.6609e-06, 1.8008e-06, 1.6861e-06, 1.6437e-06, 1.7236e-06],
+  val_loss: [6.3267e-06, 9.331e-06, 7.3986e-07, 1.1065e-06, 1.0925e-06,
+    9.123e-07, 7.7121e-07, 5.7863e-07, 5.4503e-07, 6.1686e-07, 5.6527e-07,
+    5.4038e-07, 1.2731e-06, 7.1048e-07, 1.1336e-06, 1.2739e-06, 8.4147e-07,
+    5.6773e-07, 5.6602e-07, 5.5368e-07, 6.2012e-07, 6.7852e-07, 6.5232e-07,
+    1.7252e-06, 5.629e-07, 5.9112e-07, 5.8433e-07, 5.9105e-07, 5.5192e-07,
+    5.5517e-07]
+};
+
+const CORR = {
+  labels: ["Battery %", "Apps running", "CPU usage", "Voltage"],
+  values: [
+    [1.00, 0.29, 0.51, 0.34],
+    [0.29, 1.00, 0.31, 0.41],
+    [0.51, 0.31, 1.00, 0.79],
+    [0.34, 0.41, 0.79, 1.00]
+  ]
+};
+
+/* Last 50 readings and the 24-step forecast, as plotted in the notebook run. */
+const HIST_TAIL = [
+  32.3,32.3,32.3,32.3, 32.2,32.2,32.2,32.2,32.2,32.2,
+  32.1,32.1,32.1,32.1,32.1,32.1,32.1, 32.0,32.0,32.0,32.0,
+  31.9,31.9,31.9,31.9,31.9,31.9, 31.8,31.8,31.8,31.8,31.8,31.8,
+  31.7,31.7,31.7,31.7,31.7,31.7,31.7, 31.6,31.6,31.6,31.6,31.6,31.6,31.6,31.6,31.6,31.6
+];
+const FORECAST = [
+  31.601,31.602,31.617,31.633,31.643,31.650,31.654,31.657,31.659,31.661,
+  31.663,31.664,31.665,31.666,31.667,31.668,31.669,31.670,31.671,31.672,
+  31.673,31.674,31.674,31.675
+];
+
+/* Sequential blue ramps (reference palette): low → high magnitude. */
+const SEQ_LIGHT = ["#cde2fb","#9ec5f4","#6da7ec","#3987e5","#256abf","#1c5cab","#104281"];
+const SEQ_DARK  = ["#0d366b","#184f95","#1c5cab","#2a78d6","#3987e5","#6da7ec","#9ec5f4"];
+
+/* ================= Helpers ================= */
+const $ = (sel) => document.querySelector(sel);
+const NS = "http://www.w3.org/2000/svg";
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function el(tag, attrs = {}, text) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function svgEl(tag, attrs = {}) {
+  const node = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  return node;
+}
+function sciParts(x) {
+  const [m, e] = x.toExponential(2).split("e");
+  return { m, e: Number(e) };
+}
+const SUPS = { "-": "⁻", "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+  "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹" };
+function supStr(n) { return String(n).split("").map(c => SUPS[c] || c).join(""); }
+function fmtSci(x) {
+  const { m, e } = sciParts(x);
+  return `${m}×10${supStr(e)}`;
+}
+
+function legend(container, entries) {
+  container.textContent = "";
+  for (const { name, color } of entries) {
+    const key = el("span", { class: "key" });
+    const swatch = el("span", { class: "swatch" });
+    swatch.style.borderTopColor = color;
+    key.append(swatch, el("span", {}, name));
+    container.append(key);
+  }
+}
+
+function makeTip(body) {
+  const tip = el("div", { class: "tip", role: "status" });
+  body.append(tip);
+  return tip;
+}
+function fillTip(tip, title, rows) {
+  tip.textContent = "";
+  tip.append(el("div", { class: "tip-title" }, title));
+  for (const r of rows) {
+    const row = el("div", { class: "row" });
+    const k = el("span", { class: "k" });
+    k.style.borderTopColor = r.color;
+    row.append(k, el("span", { class: "v" }, r.value), el("span", { class: "s" }, r.name));
+    tip.append(row);
+  }
+}
+function placeTip(tip, body, xPx, yPx) {
+  const bw = body.clientWidth, tw = tip.offsetWidth;
+  let left = xPx + 14;
+  if (left + tw > bw - 4) left = xPx - tw - 14;
+  tip.style.left = Math.max(4, left) + "px";
+  tip.style.top = Math.max(0, yPx) + "px";
+}
+
+/* Generic interactive line chart with crosshair, tooltip and keyboard support. */
+function lineChart(body, cfg) {
+  body.textContent = "";
+  const W = Math.max(320, body.clientWidth || 640);
+  const H = cfg.height;
+  const pad = cfg.pad;
+  const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+
+  const svg = svgEl("svg", {
+    viewBox: `0 0 ${W} ${H}`, width: W, height: H,
+    role: "img", "aria-label": cfg.ariaLabel, tabindex: "0"
+  });
+
+  const x = (i) => pad.l + (i - cfg.xMin) / (cfg.xMax - cfg.xMin) * plotW;
+  const y = (v) => pad.t + (1 - (cfg.yScale(v) - cfg.yLo) / (cfg.yHi - cfg.yLo)) * plotH;
+
+  // gridlines + y tick labels
+  for (const tick of cfg.yTicks) {
+    const yy = y(tick.v);
+    svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: yy, y2: yy,
+      stroke: cssVar("--grid"), "stroke-width": 1 }));
+    const label = svgEl("text", { x: pad.l - 8, y: yy + 4, "text-anchor": "end",
+      "font-size": 11.5, fill: cssVar("--muted") });
+    label.textContent = tick.label;
+    svg.append(label);
+  }
+  // x ticks
+  for (const tick of cfg.xTicks) {
+    const xx = x(tick.v);
+    const label = svgEl("text", { x: xx, y: H - pad.b + 20, "text-anchor": "middle",
+      "font-size": 11.5, fill: cssVar("--muted") });
+    label.textContent = tick.label;
+    svg.append(label);
+    svg.append(svgEl("line", { x1: xx, x2: xx, y1: H - pad.b, y2: H - pad.b + 5,
+      stroke: cssVar("--baseline"), "stroke-width": 1 }));
+  }
+  // baseline
+  svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b,
+    stroke: cssVar("--baseline"), "stroke-width": 1 }));
+  // axis titles
+  if (cfg.xTitle) {
+    const t = svgEl("text", { x: pad.l + plotW / 2, y: H - 6, "text-anchor": "middle",
+      "font-size": 11.5, fill: cssVar("--muted") });
+    t.textContent = cfg.xTitle;
+    svg.append(t);
+  }
+
+  // extra decorations (e.g. "now" divider)
+  if (cfg.decorate) cfg.decorate(svg, x, y, { W, H, pad });
+
+  // series paths
+  for (const s of cfg.series) {
+    const pts = s.points.map(p => `${x(p.x).toFixed(1)},${y(p.y).toFixed(1)}`).join(" ");
+    svg.append(svgEl("polyline", { points: pts, fill: "none",
+      stroke: s.color(), "stroke-width": 2, "stroke-linejoin": "round",
+      "stroke-linecap": "round" }));
+    const last = s.points[s.points.length - 1];
+    // end marker with surface ring
+    svg.append(svgEl("circle", { cx: x(last.x), cy: y(last.y), r: 5.5,
+      fill: cssVar("--surface-1") }));
+    svg.append(svgEl("circle", { cx: x(last.x), cy: y(last.y), r: 4, fill: s.color() }));
+    if (s.endLabel) {
+      const lbl = svgEl("text", { x: x(last.x) + 9, y: y(last.y) + s.endLabelDy,
+        "font-size": 12, "font-weight": 600, fill: cssVar("--ink-2") });
+      lbl.textContent = s.endLabel;
+      svg.append(lbl);
+    }
+  }
+
+  // crosshair + hover layer
+  const cross = svgEl("line", { y1: pad.t, y2: H - pad.b,
+    stroke: cssVar("--baseline"), "stroke-width": 1, opacity: 0 });
+  svg.append(cross);
+  const dots = cfg.series.map(s => {
+    const g = svgEl("g", { opacity: 0 });
+    g.append(svgEl("circle", { r: 6, fill: cssVar("--surface-1") }));
+    const inner = svgEl("circle", { r: 4.5, fill: s.color() });
+    g.append(inner);
+    svg.append(g);
+    return g;
+  });
+
+  const tip = makeTip(body);
+  let active = -1;
+
+  function showIndex(i) {
+    active = i;
+    const xi = cfg.xMin + i;
+    const xx = x(xi);
+    cross.setAttribute("x1", xx); cross.setAttribute("x2", xx);
+    cross.setAttribute("opacity", 1);
+    const rows = [];
+    cfg.series.forEach((s, si) => {
+      const p = s.points.find(pt => pt.x === xi);
+      if (p) {
+        dots[si].setAttribute("transform", `translate(${x(p.x)},${y(p.y)})`);
+        dots[si].setAttribute("opacity", 1);
+        rows.push({ color: s.color(), value: cfg.fmt(p.y), name: s.name });
+      } else {
+        dots[si].setAttribute("opacity", 0);
+      }
+    });
+    fillTip(tip, cfg.xLabel(xi), rows);
+    tip.classList.add("on");
+    placeTip(tip, body, xx * (body.clientWidth / W), pad.t);
+  }
+  function hide() {
+    active = -1;
+    cross.setAttribute("opacity", 0);
+    dots.forEach(d => d.setAttribute("opacity", 0));
+    tip.classList.remove("on");
+  }
+
+  svg.addEventListener("pointermove", (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) * (W / rect.width);
+    const i = Math.round((px - pad.l) / plotW * (cfg.xMax - cfg.xMin));
+    if (i >= 0 && i <= cfg.xMax - cfg.xMin) showIndex(i); else hide();
+  });
+  svg.addEventListener("pointerleave", hide);
+  svg.addEventListener("focus", () => showIndex(active < 0 ? cfg.xMax - cfg.xMin : active));
+  svg.addEventListener("blur", hide);
+  svg.addEventListener("keydown", (ev) => {
+    if (ev.key === "ArrowRight") { showIndex(Math.min(cfg.xMax - cfg.xMin, (active < 0 ? 0 : active + 1))); ev.preventDefault(); }
+    if (ev.key === "ArrowLeft")  { showIndex(Math.max(0, (active < 0 ? 0 : active - 1))); ev.preventDefault(); }
+    if (ev.key === "Escape") hide();
+  });
+
+  body.append(svg);
+}
+
+/* ================= Loss chart ================= */
+function renderLossChart() {
+  const body = $("#lossChart");
+  const train = HISTORY.loss.map((v, i) => ({ x: i + 1, y: v }));
+  const val = HISTORY.val_loss.map((v, i) => ({ x: i + 1, y: v }));
+  const log = Math.log10;
+
+  lineChart(body, {
+    height: 320,
+    pad: { l: 52, r: 96, t: 16, b: 44 },
+    xMin: 1, xMax: 30,
+    yScale: log, yLo: log(3e-7), yHi: log(3e-3),
+    yTicks: [
+      { v: 1e-3, label: "10⁻³" }, { v: 1e-4, label: "10⁻⁴" },
+      { v: 1e-5, label: "10⁻⁵" }, { v: 1e-6, label: "10⁻⁶" }
+    ],
+    xTicks: [1, 5, 10, 15, 20, 25, 30].map(v => ({ v, label: String(v) })),
+    xTitle: "Epoch",
+    ariaLabel: "Training and validation mean squared error per epoch on a log scale. Both fall from about ten to the minus three to about ten to the minus six within five epochs. Full values in the adjacent table view.",
+    series: [
+      { name: "Training loss", color: () => cssVar("--series-1"),
+        points: train, endLabel: "Training", endLabelDy: -6 },
+      { name: "Validation loss", color: () => cssVar("--series-2"),
+        points: val, endLabel: "Validation", endLabelDy: 14 }
+    ],
+    fmt: fmtSci,
+    xLabel: (x) => `Epoch ${x}`
+  });
+
+  legend($("#lossLegend"), [
+    { name: "Training loss", color: cssVar("--series-1") },
+    { name: "Validation loss", color: cssVar("--series-2") }
+  ]);
+}
+
+function buildLossTable() {
+  const holder = $("#lossTable");
+  holder.textContent = "";
+  const table = el("table");
+  const cap = el("caption", { class: "sr-only" });
+  cap.textContent = "Training and validation loss per epoch";
+  const thead = el("thead");
+  const hr = el("tr");
+  ["Epoch", "Training loss", "Validation loss"].forEach(h => hr.append(el("th", { scope: "col" }, h)));
+  thead.append(hr);
+  const tbody = el("tbody");
+  HISTORY.loss.forEach((v, i) => {
+    const tr = el("tr");
+    tr.append(el("td", {}, String(i + 1)));
+    tr.append(el("td", {}, v.toExponential(4)));
+    tr.append(el("td", {}, HISTORY.val_loss[i].toExponential(4)));
+    tbody.append(tr);
+  });
+  table.append(thead, tbody);
+  holder.append(table);
+}
+
+/* ================= Correlation heatmap ================= */
+function renderHeatmap() {
+  const holder = $("#corrHeat");
+  holder.textContent = "";
+  const dark = document.documentElement.dataset.theme === "dark";
+  const ramp = dark ? SEQ_DARK : SEQ_LIGHT;
+  const lo = 0.25, hi = 1.0;
+
+  const colorFor = (v) => {
+    const t = Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
+    return ramp[Math.min(ramp.length - 1, Math.floor(t * ramp.length))];
+  };
+  const inkFor = (v) => {
+    const t = (v - lo) / (hi - lo);
+    if (dark) return t > 0.62 ? "#0b0b0b" : "#ffffff";
+    return t > 0.45 ? "#ffffff" : "#0b0b0b";
+  };
+
+  const grid = el("div", { class: "heat", role: "img",
+    "aria-label": "Correlation heatmap of the four model features. Values range from 0.29 to 1. Full values in the adjacent table view." });
+  grid.append(el("div", { class: "corner" }));
+  CORR.labels.forEach(l => grid.append(el("div", { class: "vlab" }, l)));
+
+  CORR.values.forEach((row, ri) => {
+    grid.append(el("div", { class: "hlab" }, CORR.labels[ri]));
+    row.forEach((v, ci) => {
+      const cell = el("div", { class: "cell", tabindex: "0",
+        title: `${CORR.labels[ri]} × ${CORR.labels[ci]}: r = ${v.toFixed(2)}` },
+        v.toFixed(2));
+      cell.style.background = colorFor(v);
+      cell.style.color = inkFor(v);
+      grid.append(cell);
+    });
+  });
+  holder.append(grid);
+
+  const scale = el("div", { class: "scale-legend" });
+  const bar = el("span", { class: "bar", "aria-hidden": "true" });
+  bar.style.background = `linear-gradient(90deg, ${ramp[0]}, ${ramp[ramp.length - 1]})`;
+  scale.append(el("span", {}, "0.25"), bar, el("span", {}, "1.00"));
+  holder.append(scale);
+}
+
+function buildCorrTable() {
+  const holder = $("#corrTable");
+  holder.textContent = "";
+  const table = el("table");
+  const thead = el("thead");
+  const hr = el("tr");
+  hr.append(el("th", { scope: "col" }, "Feature"));
+  CORR.labels.forEach(l => hr.append(el("th", { scope: "col" }, l)));
+  thead.append(hr);
+  const tbody = el("tbody");
+  CORR.values.forEach((row, ri) => {
+    const tr = el("tr");
+    tr.append(el("td", {}, CORR.labels[ri]));
+    row.forEach(v => tr.append(el("td", {}, v.toFixed(2))));
+    tbody.append(tr);
+  });
+  table.append(thead, tbody);
+  holder.append(table);
+}
+
+/* ================= Forecast chart ================= */
+function renderForecastChart() {
+  const body = $("#fcChart");
+  const hist = HIST_TAIL.map((v, i) => ({ x: i, y: v }));
+  const fc = FORECAST.map((v, i) => ({ x: HIST_TAIL.length + i, y: v }));
+  // join the two lines visually
+  fc.unshift({ x: HIST_TAIL.length - 1, y: HIST_TAIL[HIST_TAIL.length - 1] });
+
+  lineChart(body, {
+    height: 300,
+    pad: { l: 52, r: 84, t: 18, b: 44 },
+    xMin: 0, xMax: 73,
+    yScale: (v) => v, yLo: 31.5, yHi: 32.4,
+    yTicks: [31.6, 31.8, 32.0, 32.2, 32.4].map(v => ({ v, label: v.toFixed(1) + "%" })),
+    xTicks: [0, 25, 49, 61, 73].map(v => ({
+      v, label: v <= 49 ? `t−${49 - v}` : `t+${v - 49}`
+    })),
+    xTitle: "Timestep (t = last observation)",
+    ariaLabel: "The last fifty battery percentage readings stepping down from 32.3 to 31.6 percent, followed by a 24-step forecast levelling off just above 31.6 percent. Full values in the adjacent table view.",
+    decorate: (svg, x, y, dims) => {
+      const xx = x(49);
+      svg.append(svgEl("line", { x1: xx, x2: xx, y1: dims.pad.t, y2: dims.H - dims.pad.b,
+        stroke: cssVar("--grid"), "stroke-width": 1 }));
+      const lbl = svgEl("text", { x: xx + 6, y: dims.pad.t + 10, "font-size": 11,
+        fill: cssVar("--muted") });
+      lbl.textContent = "forecast →";
+      svg.append(lbl);
+    },
+    series: [
+      { name: "Observed", color: () => cssVar("--de-emphasis"),
+        points: hist, endLabel: "", endLabelDy: 0 },
+      { name: "Forecast", color: () => cssVar("--series-1"),
+        points: fc, endLabel: "31.68%", endLabelDy: 4 }
+    ],
+    fmt: (v) => v.toFixed(2) + "%",
+    xLabel: (x) => x <= 49 ? `Observation t−${49 - x}` : `Forecast t+${x - 49}`
+  });
+
+  legend($("#fcLegend"), [
+    { name: "Observed (last 50)", color: cssVar("--de-emphasis") },
+    { name: "Forecast (24 steps)", color: cssVar("--series-1") }
+  ]);
+}
+
+function buildForecastTable() {
+  const holder = $("#fcTable");
+  holder.textContent = "";
+  const table = el("table");
+  const thead = el("thead");
+  const hr = el("tr");
+  ["Step", "Series", "Battery %"].forEach(h => hr.append(el("th", { scope: "col" }, h)));
+  thead.append(hr);
+  const tbody = el("tbody");
+  HIST_TAIL.forEach((v, i) => {
+    const tr = el("tr");
+    tr.append(el("td", {}, `t−${49 - i}`), el("td", {}, "Observed"), el("td", {}, v.toFixed(2)));
+    tbody.append(tr);
+  });
+  FORECAST.forEach((v, i) => {
+    const tr = el("tr");
+    tr.append(el("td", {}, `t+${i + 1}`), el("td", {}, "Forecast"), el("td", {}, v.toFixed(3)));
+    tbody.append(tr);
+  });
+  table.append(thead, tbody);
+  holder.append(table);
+}
+
+/* ================= KPI sparkline ================= */
+function renderSpark() {
+  const holder = $("#sparkVal");
+  holder.textContent = "";
+  const values = HISTORY.val_loss.slice(-12).map(Math.log10);
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const W = 120, H = 26, n = values.length;
+  const x = (i) => 2 + i / (n - 1) * (W - 8);
+  const y = (v) => hi === lo ? H / 2 : 3 + (1 - (v - lo) / (hi - lo)) * (H - 8);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H });
+  svg.append(svgEl("polyline", {
+    points: values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" "),
+    fill: "none", stroke: cssVar("--de-emphasis"), "stroke-width": 2,
+    "stroke-linecap": "round", "stroke-linejoin": "round"
+  }));
+  svg.append(svgEl("circle", { cx: x(n - 1), cy: y(values[n - 1]), r: 3.5,
+    fill: cssVar("--series-1") }));
+  holder.append(svg);
+}
+
+/* ================= Chart/table toggles ================= */
+const VIEWS = {
+  loss: { chart: "#lossChart", table: "#lossTable", legend: "#lossLegend" },
+  corr: { chart: "#corrHeat", table: "#corrTable", legend: null },
+  fc:   { chart: "#fcChart", table: "#fcTable", legend: "#fcLegend" }
+};
+document.querySelectorAll(".toggle").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const view = VIEWS[btn.dataset.toggle];
+    const showTable = btn.getAttribute("aria-pressed") !== "true";
+    btn.setAttribute("aria-pressed", String(showTable));
+    btn.textContent = showTable ? "View chart" : "View table";
+    $(view.chart).hidden = showTable;
+    if (view.legend) $(view.legend).hidden = showTable;
+    $(view.table).hidden = !showTable;
+  });
+});
+
+/* ================= Theme ================= */
+const themeBtn = $("#themeToggle");
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $("#themeLabel").textContent = theme === "dark" ? "Light" : "Dark";
+  renderAll();
+}
+themeBtn.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  localStorage.setItem("theme", next);
+  applyTheme(next);
+});
+const urlTheme = new URLSearchParams(location.search).get("theme");
+const stored = localStorage.getItem("theme");
+const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
+document.documentElement.dataset.theme =
+  urlTheme || stored || (prefersDark.matches ? "dark" : "light");
+$("#themeLabel").textContent =
+  document.documentElement.dataset.theme === "dark" ? "Light" : "Dark";
+prefersDark.addEventListener("change", (e) => {
+  if (!localStorage.getItem("theme")) applyTheme(e.matches ? "dark" : "light");
+});
+
+/* ================= Render ================= */
+function renderAll() {
+  renderLossChart();
+  renderForecastChart();
+  renderHeatmap();
+  renderSpark();
+}
+buildLossTable();
+buildCorrTable();
+buildForecastTable();
+renderAll();
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderAll, 150);
+});
+</script>
+</body>
+</html>
