@@ -5,3 +5,7 @@ services:
     buildCommand: ""
     staticPublishPath: docs
     autoDeployTrigger: commit
+    envVars:
+      # the dashboard is prebuilt static HTML — skip Python dependency detection
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
