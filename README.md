@@ -8,9 +8,9 @@ trained Keras LSTM and an interactive results dashboard.**
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.16%2B-FF6F00?logo=tensorflow&logoColor=white)](https://www.tensorflow.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2a78d6.svg)](LICENSE)
-[![Dashboard](https://img.shields.io/badge/Dashboard-live-1baf7a)](https://abdullah-masood-05.github.io/BatteryDegForecastLSTM/)
+[![Dashboard](https://img.shields.io/badge/Dashboard-live-1baf7a)](https://battery-forecast-dashboard.onrender.com/)
 
-[**Live dashboard**](https://abdullah-masood-05.github.io/BatteryDegForecastLSTM/) ·
+[**Live dashboard**](https://battery-forecast-dashboard.onrender.com/) ·
 [Notebook](notebooks/battery_degradation_forecasting.ipynb) ·
 [Model card](models/README.md) ·
 [Dataset (Kaggle)](https://www.kaggle.com/datasets/rahulgarg28/mobile-battery-with-time)
@@ -109,9 +109,10 @@ dependencies:
 python -m http.server -d docs 8000   # then open http://localhost:8000
 ```
 
-Hosted version: enable **GitHub Pages → deploy from `main` / `docs`** in the
-repository settings, and it serves at
-`https://abdullah-masood-05.github.io/BatteryDegForecastLSTM/`.
+Hosted version: the dashboard deploys to [Render](https://render.com/) as a
+static site from `render.yaml` (publish path `docs/`, auto-deploy on push) and
+serves at <https://battery-forecast-dashboard.onrender.com/>. GitHub Pages
+(`main` / `docs`) works as an alternative host.
 
 ## Project structure
 

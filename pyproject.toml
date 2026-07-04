@@ -37,7 +37,7 @@ battery-forecast = "battery_forecast.cli:main"
 
 [project.urls]
 Repository = "https://github.com/Abdullah-Masood-05/BatteryDegForecastLSTM"
-Dashboard = "https://abdullah-masood-05.github.io/BatteryDegForecastLSTM/"
+Dashboard = "https://battery-forecast-dashboard.onrender.com/"
 Dataset = "https://www.kaggle.com/datasets/rahulgarg28/mobile-battery-with-time"
 
 [tool.setuptools.packages.find]
